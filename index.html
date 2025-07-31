@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Meu Painel</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f8f9fa;
+      min-height: 100vh;
+      color: #333;
+    }
+
+    .header {
+      background: #1a73e8;
+      color: white;
+      padding: 15px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+
+    .header h1 {
+      font-size: 22px;
+    }
+
+    .user-profile {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: white;
+      padding: 6px 12px;
+      border-radius: 20px;
+      color: #333;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .user-profile img {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 30px auto;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .alert {
+      background: #ffeb3b;
+      color: #333;
+      padding: 20px;
+      border-radius: 12px;
+      margin: 20px 0;
+      font-size: 18px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      animation: fadeIn 0.6s ease;
+    }
+
+    .alert p {
+      margin: 8px 0;
+    }
+
+    .login-area {
+      text-align: center;
+      padding: 60px 20px;
+    }
+
+    .login-btn {
+      background: #4285F4;
+      color: white;
+      border: none;
+      padding: 14px 24px;
+      font-size: 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      transition: background 0.3s;
+    }
+
+    .login-btn:hover {
+      background: #3367D6;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <!-- Cabeçalho com nome e foto -->
+  <div class="header">
+    <h1>Meu Painel de Avisos</h1>
+    <div id="userProfile" style="display: none;" class="user-profile">
+      <img id="userPhoto" src="" alt="Foto" />
+      <span id="userName"></span>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Aviso será exibido aqui (só após login) -->
+    <div id="aviso" style="display: none;" class="alert">
+      <p><strong>📢 Aviso Geral:</strong></p>
+      <p id="avisoTexto"></p>
+      <small><em>Atualizado em: <span id="avisoData"></span></em></small>
+    </div>
+
+    <!-- Mensagem quando não há aviso (só aparece após login) -->
+    <p id="semAviso" style="display: none; color: #666; font-size: 18px; margin-top: 40px;">
+      Nenhum aviso no momento.
+    </p>
+
+    <!-- Tela de login -->
+    <div id="loginArea" class="login-area">
+      <h2>Bem-vindo</h2>
+      <p>Faça login com sua conta Google para acessar o painel.</p>
+      <button id="btnLogin" class="login-btn">Entrar com Google</button>
+    </div>
+  </div>
+
+  <script type="module">
+    // Importar Firebase
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+    import { getFirestore, collection, query, onSnapshot } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCXFhRZ_Byp40-sIxaNkyICoe066p6J04w",
+      authDomain: "banco-sulegal-e93c5.firebaseapp.com",
+      projectId: "banco-sulegal-e93c5",
+      storageBucket: "banco-sulegal-e93c5.firebasestorage.app",
+      messagingSenderId: "917084456664",
+      appId: "1:917084456664:web:0fa0ecae429aded7cbb9ad",
+      measurementId: "G-LTXPBFK5JV"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const provider = new GoogleAuthProvider();
+
+    // Elementos DOM
+    const btnLogin = document.getElementById("btnLogin");
+    const loginArea = document.getElementById("loginArea");
+    const userProfile = document.getElementById("userProfile");
+    const userName = document.getElementById("userName");
+    const userPhoto = document.getElementById("userPhoto");
+    const aviso = document.getElementById("aviso");
+    const avisoTexto = document.getElementById("avisoTexto");
+    const avisoData = document.getElementById("avisoData");
+    const semAviso = document.getElementById("semAviso");
+
+    // Referência para o listener de avisos (para poder cancelar se necessário)
+    let avisoListener = null;
+
+    // Função para parar de escutar avisos
+    const stopAvisoListener = () => {
+      if (avisoListener) {
+        avisoListener();
+        avisoListener = null;
+      }
+    };
+
+    // Login
+    btnLogin.onclick = () => {
+      signInWithPopup(auth, provider).catch((error) => {
+        alert("Erro no login: " + error.message);
+      });
+    };
+
+    // Monitorar autenticação
+    onAuthStateChanged(auth, (user) => {
+      // Sempre limpa o listener ao mudar estado
+      stopAvisoListener();
+
+      if (user) {
+        // Usuário logado
+        loginArea.style.display = "none";
+        userProfile.style.display = "flex";
+        userName.textContent = user.displayName;
+        userPhoto.src = user.photoURL || `https://placehold.co/36x36/4285F4/FFFFFF?text=${user.displayName.charAt(0)}`;
+
+        // ✅ Agora sim: escuta avisos do Firestore (só depois do login)
+        const q = query(collection(db, "avisos"));
+        avisoListener = onSnapshot(q, (snapshot) => {
+          if (!snapshot.empty) {
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              avisoTexto.textContent = data.mensagem || "Sem mensagem";
+              const timestamp = data.dataCriacao?.seconds ? new Date(data.dataCriacao.seconds * 1000) : new Date();
+              avisoData.textContent = timestamp.toLocaleString();
+              aviso.style.display = "block";
+              semAviso.style.display = "none";
+            });
+          } else {
+            aviso.style.display = "none";
+            semAviso.style.display = "block";
+          }
+        });
+
+      } else {
+        // Usuário não logado
+        loginArea.style.display = "block";
+        userProfile.style.display = "none";
+        aviso.style.display = "none";
+        semAviso.style.display = "none"; // Esconde "sem aviso" também
+      }
+    });
+  </script>
+</body>
+</html>
